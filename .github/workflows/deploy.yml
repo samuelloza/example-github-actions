@@ -1,0 +1,17 @@
+name: Mi primer workflow
+
+on:
+  push:
+    branch: main
+
+jobs:
+  mi-job:
+    runs-on: ubuntu-latest
+    steps:
+      -uses: actions/checkput@v3
+
+      -name: Lista de archivos
+       run: ls -lha
+
+      #-name: ejecutar codigo de Python
+      # run: python main.py
