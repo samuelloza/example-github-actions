@@ -1,17 +1,57 @@
-name: Mi primer workflow
-
+name: OnlineJudge - admin
 on:
   push:
-    branch: main
+    branches:
+      - main
 
 jobs:
-  mi-job:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
 
-      - name: Lista de archivos
-        run: ls -lha
+  docker-package:
+    needs: build
+    runs-on: ubuntu-latest 
+    permissions: write-all
+    if: ${{github.ref == 'refs/heads/main'}}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Login to Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build Docker images
+      run: |
+        docker build . --build-arg --rm -t ghcr.io/starsaminf/example-github-actions:develop
+    - name: Push Docker image to registry
+      run: |
+        docker push ghcr.io/starsaminf/example-github-actions:develop
 
-      #-name: ejecutar codigo de Python
-      # run: python main.py
+  deploy:
+    runs-on: ubuntu-latest
+    needs: docker-package
+    if: ${{github.ref == 'refs/heads/main'}}
+    steps:
+      - name: Setup SSH connection
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEV_SSH_SECRET }}
+
+      - name: Adding Known Hosts
+        run: ssh-keyscan -p ${{ vars.DEV_SSH_PORT }} -H ${{ vars.DEV_SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Login to the GitHub Packages Docker Registry
+        run: ssh -tt -p ${{ vars.DEV_SSH_PORT }} ${{ vars.DEV_SSH_USERNAME }}@${{ vars.DEV_SSH_HOST }} "echo ${{ secrets.DOCKER_REGISTRY_TOKEN }} | docker login ghcr.io -u ${{ vars.DOCKER_REGISTRY_USER }}" --password-stdin
+
+      - name: Run docker-compose
+        continue-on-error: true
+        run: ssh -tt -p ${{ vars.DEV_SSH_PORT }} ${{ vars.DEV_SSH_USERNAME }}@${{ vars.DEV_SSH_HOST }} "cd ejemplo && chmod +x deploy.sh && ./deploy.sh"
+
+      - name: Delete unused images
+        run: ssh -tt -p ${{ vars.DEV_SSH_PORT }} ${{ vars.DEV_SSH_USERNAME }}@${{ vars.DEV_SSH_HOST }} "docker image prune -f"
+
+      - name: Logout from the GitHub Packages Docker Registry
+        run: ssh -tt -p ${{ vars.DEV_SSH_PORT }} ${{ vars.DEV_SSH_USERNAME }}@${{ vars.DEV_SSH_HOST }} "docker logout ghcr.io"
